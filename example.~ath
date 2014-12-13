@@ -1,0 +1,5 @@
+import ostream stdout;
+
+stdout.write EXECUTE (`Hello, World.');
+
+THIS.DIE();

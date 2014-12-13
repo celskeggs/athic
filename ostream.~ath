@@ -1,0 +1,12 @@
+import method strlen;
+import native write;
+
+stdout = ~ATH(NULL) {
+	write = ~ATH(THIS) {
+		strlen EXECUTE THIS;
+		write.count = strlen.length;
+		write.fd = 1;
+		write EXECUTE THIS;
+		THIS = NULL;
+	};
+};
