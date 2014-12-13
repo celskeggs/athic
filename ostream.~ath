@@ -1,12 +1,22 @@
-import method strlen;
+// import method strlen;
 import native write;
 
-stdout = ~ATH(NULL) {
-	write = ~ATH(THIS) {
-		strlen EXECUTE THIS;
-		write.count = strlen.length;
-		write.fd = 1;
-		write EXECUTE THIS;
-		THIS = NULL;
-	};
+strlen = ~ATH(THIS) {
+	core EXECUTE THIS;
+	length = core.THIS - THIS;
 };
+strlen.core = ~ATH(getptr(THIS)) {
+	THIS = THIS + 1;
+};
+
+EXPORT = ~ATH(NULL) {
+	write = NULL;
+};
+EXPORT.write = ~ATH(THIS) {
+	strlen EXECUTE THIS;
+//	write.count = strlen.length;
+//	write.fd = 1;
+	write EXECUTE THIS;
+	THIS = NULL;
+};
+EXPORT.write.strlen = strlen;
