@@ -75,16 +75,16 @@ class Parser:
 	last_token = None
 
 	def __init__(self, tokens):
-		self.tokensource = tokens
+		self.token_source = tokens
 
 	def consume(self):
 		self.last_token, self.last_value = self.next_token
 		self.next_token = None
 
 	def token(self):
-		if self.next_token == None:
+		if self.next_token is None:
 			try:
-				self.next_token = next(self.tokensource)
+				self.next_token = next(self.token_source)
 			except StopIteration:
 				self.next_token = ("eof", None)
 		return self.next_token[0]
@@ -105,84 +105,89 @@ class Parser:
 		assert self.accept(token), "Expected token %s but got %s" % (token, self.token())
 		return self.last_value
 
-	operators = {1: ".", 3: "+-"}
-	unary_ops = {2: "@"}
+	binary_operators = {1: (".",), 3: ("+", "-")}
+	unary_ops = {2: ("@",)}
 	arith_map = {"+": "add", "-": "sub"}
 
-	def produce_operator(self, a, operator, prec):
+	def produce_operator(self, a, operator, precedence):
 		if operator == ".":
 			b = self.expect("symbol")
-			return ("deref", a, b)
+			return "deref", a, b
 		elif operator in "+-":
-			b = self.parse_expression(prec - 1)
-			return (self.arith_map[operator], a, b)
+			b = self.parse_expression(precedence - 1)
+			return self.arith_map[operator], a, b
 		else:
 			raise Exception("Internal error: unexpected %s" % (operator,))
 
 	def produce_operator_unary(self, operator, expr):
 		if operator == "@":
-			return ("unptr", expr)
+			return "unptr", expr
 		else:
 			raise Exception("Internal error: unexpected %s" % (operator,))
 
-	def parse_expression(self, prec=max(operators.keys())):
-		if prec <= 0:  # simple term
+	def parse_expression(self, precedence=max(binary_operators.keys())):
+		if precedence <= 0:  # simple term
 			if self.accept("symbol"):
-				return ("var", self.last_value)
+				return "var", self.last_value
 			elif self.accept("integer"):
-				return ("const", self.last_value)
+				return "const", self.last_value
 			elif self.accept("string"):
-				return ("const", self.last_value)
+				return "const", self.last_value
 			elif self.accept("tildeath"):
 				condition = self.parse_expression()
 				self.expect("{")
 				body = self.parse_block("}")
-				return ("tildeath", condition, body)
+				return "tildeath", condition, body
 			else:
 				self.expect("(")
 				out = self.parse_expression()
 				self.expect(")")
 				return out
 		else:
-			uops = []
-			while self.accept_any(self.unary_ops.get(prec, ())):
-				uops.append(self.last_token)
-			head = self.parse_expression(prec - 1)
-			uops.reverse()
-			for op in uops:
+			unary_operators = []
+			if precedence in self.unary_ops:
+				while self.accept_any(self.unary_ops[precedence]):
+					unary_operators.append(self.last_token)
+
+			head = self.parse_expression(precedence - 1)
+
+			unary_operators.reverse()
+			for op in unary_operators:
 				head = self.produce_operator_unary(op, head)
-			while self.accept_any(self.operators.get(prec, ())):
-				operator = self.last_token
-				head = self.produce_operator(head, operator, prec)
+
+			if precedence in self.binary_operators:
+				while self.accept_any(self.binary_operators[precedence]):
+					operator = self.last_token
+					head = self.produce_operator(head, operator, precedence)
 			return head
 
 	def parse_statement(self):
 		if self.accept("import"):
-			typename = self.expect("symbol")
-			objname = self.expect("symbol");
+			type_name = self.expect("symbol")
+			object_name = self.expect("symbol")
 			self.expect(";")
-			return ("import", typename, objname)
+			return "import", type_name, object_name
 		else:
 			expr = self.parse_expression()
 			if self.accept("execute"):
 				arg = self.parse_expression()
 				self.expect(";")
-				return ("execute", expr, arg)
+				return "execute", expr, arg
 			elif self.accept("("):
 				self.expect(")")
 				self.expect(";")
-				return ("direct", expr)
+				return "direct", expr
 			elif expr[0] == "var" and self.accept("="):
 				arg = self.parse_expression()
 				self.expect(";")
-				return ("put", expr[1], arg)
+				return "put", expr[1], arg
 			elif expr[0] == "deref" and self.accept("="):
 				arg = self.parse_expression()
 				self.expect(";")
-				return ("putref", expr[1], expr[2], arg)
+				return "putref", expr[1], expr[2], arg
 			else:
 				self.expect(";")
-				return ("discard", expr)
+				return "discard", expr
 
 	def parse_block(self, end="eof"):
 		out = []
