@@ -8,10 +8,51 @@ def mangle(name):  # _, $, ~
 def escape(name):  # "
 	return name.replace("\\", "\\\\").replace('"', '\\"').replace('\n', '\\n')
 
+eax, ebx, ecx, edx = "eax", "ebx", "ecx", "edx"
+edi, esi, esp, ebp = "edi", "esi", "esp", "ebp"
+
+
+class InstructionOutput:
+	def __init__(self):
+		self.buffer = []
+
+	def raw(self, line):
+		self.buffer.append(line)
+
+	def add_from(self, instr):
+		self.buffer += instr.get()
+
+	def mov(self, dst, src):
+		self.raw("\tmov %s, %s" % (dst, src))
+
+	def get(self):
+		return self.buffer
+
+	def put_dword(self, dst, field, src):
+		self.mov("dword [%s+%s]" % (dst, mangle(field)), src)
+
+	def get_dword(self, dst, src, field):
+		self.mov(dst, "dword [%s+%s]" % (src, mangle(field)))
+
+	def label(self, name):
+		self.raw("%s:" % name)
+
+	def call(self, param):
+		self.raw("\tcall %s" % param)
+
+	def push(self, param):
+		self.raw("\tpush %s" % param)
+
+	def pop(self, param):
+		self.raw("\tpop %s" % param)
+
+	def ret(self):
+		self.raw('\tret')
+
 
 class Generator:
 	def __init__(self):
-		self.instructions = []
+		self.out = InstructionOutput()
 		self.externals = {"ath_alloc"}
 		self.provided = []
 		self.strings = []
@@ -19,7 +60,7 @@ class Generator:
 		self.field_ids = set()
 		self.block_var_map = {}
 		self.next_block = 0
-		self.ctor = []
+		self.ctor = InstructionOutput()
 		self.data = []
 
 	def string(self, string):
@@ -27,34 +68,33 @@ class Generator:
 			self.strings.append(string)
 		return "string_%d ; %s" % (self.strings.index(string), escape(string))
 
-	def line(self, line):
-		self.instructions.append(line)
-
 	def gen_alloc(self, length_info_ref, name, out=None):
-		out = out or self.line
-		out('\tmov eax, %s' % length_info_ref)
-		out('\tcall ath_alloc')
-		out('\tmov dword [eax], %s' % name)
+		out = out or self.out
+		out.mov(eax, length_info_ref)
+		out.call("ath_alloc")
+		out.mov("dword [eax]", name)
 
 	def process(self, cond, body, module_name):
 		assert not self.blocks
-		lenvar, name = self.build_block(cond, body)
+		length_info_ref, name = self.build_block(cond, body)
 		while self.blocks:
 			self.gen_block(*self.blocks.pop())
-		self.gen_alloc(lenvar, name, self.ctor.append)
+		self.gen_alloc(length_info_ref, name, self.ctor)
 		self.data += ["ctor_ptr_%s: dd 0" % mangle(module_name)]
 		self.provided.append("ctor_ptr_%s" % mangle(module_name))
-		self.ctor.append('\tmov [ctor_ptr_%s], eax' % mangle(module_name))
+		self.ctor.mov("[ctor_ptr_%s]" % mangle(module_name), eax)
 
 	def put_field(self, field, object_reg, source_reg):
 		assert field != "SELF"
 		self.field_ids.add(field)
-		self.line("\tmov dword [%s+fid_%s], %s" % (object_reg, mangle(field), source_reg))
+		field_id_ref = "fid_%s" % mangle(field)
+		self.out.put_dword(object_reg, field_id_ref, source_reg)
 
 	def get_field(self, field, object_reg, dest_reg):
 		assert field != "SELF"
 		self.field_ids.add(field)
-		self.line("\tmov %s, dword [%s+fid_%s]" % (dest_reg, object_reg, mangle(field)))
+		field_id_ref = "fid_%s" % mangle(field)
+		self.out.get_dword(dest_reg, object_reg, field_id_ref)
 
 	def get_expr_vars(self, expr):
 		if expr[0] == "deref":
@@ -101,48 +141,48 @@ class Generator:
 		return found
 
 	def gen_block(self, name, cond, block):
-		self.line('%s:' % name)
+		self.out.label(name)
 		if type(block) == str:
 			for line in str.split("\n"):
-				self.line(line)
+				self.out.raw(line)
 		else:
-			self.line('\tpush ebx')
-			self.line('\tmov ebx, eax')
+			self.out.push(ebx)
+			self.out.mov(ebx, eax)
 			for stmt in block:
 				if stmt[0] == "import":
 					ptr = "ctor_ptr_%s" % mangle(stmt[1])
 					self.externals.add(ptr)
-					self.line('\tmov eax, [%s]' % ptr)
-					self.put_field("LOOKUP", "eax", self.string(stmt[2]))
-					self.line('\tcall [eax]')
-					self.get_field("EXPORT", "eax", "eax")
-					self.put_field(stmt[2], "ebx", "eax")
+					self.out.mov(eax, "[%s]" % ptr)
+					self.put_field("LOOKUP", eax, self.string(stmt[2]))
+					self.out.call("[eax]")
+					self.get_field("EXPORT", eax, eax)
+					self.put_field(stmt[2], ebx, eax)
 				elif stmt[0] == "execute":
 					self.gen_expr(stmt[1])
-					self.line('\tpush eax')
+					self.out.push(eax)
 					self.gen_expr(stmt[2])
-					self.line('\tmov ecx, eax')
-					self.line('\tpop eax')
-					self.put_field("THIS", "eax", "ecx")
-					self.line('\tcall [eax]')
+					self.out.mov(ecx, eax)
+					self.out.pop(eax)
+					self.put_field("THIS", eax, ecx)
+					self.out.call("[eax]")
 				elif stmt[0] == "direct":
 					self.gen_expr(stmt[1])
-					self.line('\tcall [eax]')
+					self.out.call("[eax]")
 				elif stmt[0] == "discard":
 					self.gen_expr(stmt[1])
 				elif stmt[0] == "put":
 					self.gen_expr(stmt[2])
-					self.put_field(stmt[1], "ebx", "eax")
+					self.put_field(stmt[1], ebx, eax)
 				elif stmt[0] == "putref":  # object, field, value
 					self.gen_expr(stmt[1])
-					self.line('\tpush eax')
+					self.out.push(eax)
 					self.gen_expr(stmt[3])
-					self.line('\tpop ecx')
-					self.put_field(stmt[2], "ecx", "eax")
+					self.out.pop(ecx)
+					self.put_field(stmt[2], ecx, eax)
 				else:
 					raise Exception("Internal error: unknown %s" % (stmt,))
-			self.line('\tpop ebx')
-			self.line('\tret')
+			self.out.pop(ebx)
+			self.out.ret()
 
 	def build_block(self, cond, body):
 		name, lenvar = self.anonymous_block()
@@ -166,22 +206,22 @@ class Generator:
 			if expr[1] != "SELF":
 				self.get_field(expr[1], "ebx", "eax")
 			else:
-				self.line('\tmov eax, ebx')
+				self.out.mov(eax, ebx)
 		elif expr[0] == "const":
 			if type(expr[1]) == int:
-				self.line('\tmov eax, %d' % expr[1])
+				self.out.mov(eax, expr[1])
 			elif type(expr[1]) == str:
-				self.line('\tmov eax, %s' % self.string(expr[1]))
+				self.out.mov(eax, self.string(expr[1]))
 		elif expr[0] == "tildeath":
 			length_info_ref, name = self.build_block(expr[1], expr[2])
 			self.gen_alloc(length_info_ref, name)
 		elif expr[0] in self.arithmetic:
 			self.gen_expr(expr[1])
-			self.line('\tpush eax')
+			self.out.push(eax)
 			self.gen_expr(expr[2])
-			self.line('\tmov ecx, eax')
-			self.line('\tpop eax')
-			self.line('\t%s eax, ecx' % expr[0])
+			self.out.mov(ecx, eax)
+			self.out.pop(eax)
+			self.out.raw('\t%s eax, ecx' % expr[0])
 		else:
 			raise Exception("Internal error: unknown expr %s in %s" % (expr[0], expr[1:]))
 
@@ -221,13 +261,13 @@ class Generator:
 
 	def output(self, pretext=(), preallocated=None):
 		out = self.solve_and_apply_variables(preallocated) + list(pretext)
-		if self.instructions or self.externals:
+		if self.out.get() or self.externals:
 			out += ["section .text"]
-			out += ["extern %s" % x for x in self.externals if x not in self.provided] + self.instructions
+			out += ["extern %s" % x for x in self.externals if x not in self.provided] + self.out.get()
 		if self.strings:
 			out += ["section .rodata"] + [self.string_define(i, string) for i, string in enumerate(self.strings)]
 		if self.data:
 			out += ["section .data"] + self.data
-		if self.ctor:
-			out += ["section .init"] + self.ctor
+		if self.ctor.get():
+			out += ["section .init"] + self.ctor.get()
 		return "\n".join(out)
