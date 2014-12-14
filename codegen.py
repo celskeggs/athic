@@ -64,6 +64,7 @@ class FieldOutput(InstructionOutput):
 	def __init__(self):
 		InstructionOutput.__init__(self)
 		self.field_set = set()
+		self.local_vars = None
 
 	def field_ref(self, field):
 		assert field != "SELF"
@@ -75,6 +76,22 @@ class FieldOutput(InstructionOutput):
 
 	def get_field(self, field, object_reg, dst_reg):
 		self.get_dword(dst_reg, object_reg, self.field_ref(field))
+
+	def reset_local_vars(self):
+		self.local_vars = set()
+
+	def put_self_field(self, field, source_reg):
+		self.local_vars.add(field)
+		self.put_field(field, ebx, source_reg)
+
+	def get_self_field(self, field, dst_reg):
+		self.local_vars.add(field)
+		self.get_field(field, ebx, dst_reg)
+
+	def get_local_vars(self):
+		out = self.local_vars
+		self.local_vars = None
+		return out
 
 
 class ObjectOutput(InstructionOutput):
@@ -125,16 +142,16 @@ class Generator:
 		self.provided.append("ctor_ptr_%s" % mangle(module_name))
 		self.ctor.mov("[ctor_ptr_%s]" % mangle(module_name), eax)
 
-	def gen_expr(self, expr, local_vars):  # produces result in eax, SELF is in ebx (preserve)
+	def gen_expr(self, expr):  # produces result in eax, SELF is in ebx (preserve)
 		if expr[0] == "deref":
-			if expr[1][0] == "var" and expr[1][1] == "SELF":
-				local_vars.add(expr[2])
-			self.gen_expr(expr[1], local_vars)
-			self.out.get_field(expr[2], "eax", "eax")
+			if expr[1] == ("var", "SELF"):
+				self.out.get_self_field(expr[2], eax)
+			else:
+				self.gen_expr(expr[1])
+				self.out.get_field(expr[2], eax, eax)
 		elif expr[0] == "var":
 			if expr[1] != "SELF":
-				local_vars.add(expr[1])
-				self.out.get_field(expr[1], "ebx", "eax")
+				self.out.get_self_field(expr[1], eax)
 			else:
 				self.out.mov(eax, ebx)
 		elif expr[0] == "const":
@@ -146,16 +163,16 @@ class Generator:
 			length, name = self.build_block(expr[1], expr[2])
 			self.out.gen_alloc(length, name)
 		elif expr[0] in arithmetic:
-			self.gen_expr(expr[1], local_vars)
+			self.gen_expr(expr[1])
 			self.out.push(eax)
-			self.gen_expr(expr[2], local_vars)
+			self.gen_expr(expr[2])
 			self.out.mov(ecx, eax)
 			self.out.pop(eax)
 			self.out.raw('\t%s eax, ecx' % expr[0])
 		else:
 			raise Exception("Internal error: unknown expr %s in %s" % (expr[0], expr[1:]))
 
-	def gen_stmt(self, stmt, local_vars):
+	def gen_stmt(self, stmt):
 		if stmt[0] == "import":
 			ptr = "ctor_ptr_%s" % mangle(stmt[1])
 			self.externals.add(ptr)
@@ -163,48 +180,49 @@ class Generator:
 			self.out.put_field("LOOKUP", eax, self.out.string(stmt[2]))
 			self.out.call("[eax]")
 			self.out.get_field("EXPORT", eax, eax)
-			local_vars.add(stmt[2])
-			self.out.put_field(stmt[2], ebx, eax)
+			self.out.put_self_field(stmt[2], eax)
 		elif stmt[0] == "execute":
-			self.gen_expr(stmt[1], local_vars)
+			self.gen_expr(stmt[1])
 			self.out.push(eax)
-			self.gen_expr(stmt[2], local_vars)
+			self.gen_expr(stmt[2])
 			self.out.mov(ecx, eax)
 			self.out.pop(eax)
 			self.out.put_field("THIS", eax, ecx)
 			self.out.call("[eax]")
 		elif stmt[0] == "direct":
-			self.gen_expr(stmt[1], local_vars)
+			self.gen_expr(stmt[1])
 			self.out.call("[eax]")
 		elif stmt[0] == "discard":
-			self.gen_expr(stmt[1], local_vars)
+			self.gen_expr(stmt[1])
 		elif stmt[0] == "put":
-			self.gen_expr(stmt[2], local_vars)
-			local_vars.add(stmt[1])
-			self.out.put_field(stmt[1], ebx, eax)
+			self.gen_expr(stmt[2])
+			self.out.put_self_field(stmt[1], eax)
 		elif stmt[0] == "putref":  # object, field, value
-			if stmt[1][0] == "var" and stmt[1][1] == "SELF":
-				local_vars.add(stmt[2])
-			self.gen_expr(stmt[1], local_vars)
-			self.out.push(eax)
-			self.gen_expr(stmt[3], local_vars)
-			self.out.pop(ecx)
-			self.out.put_field(stmt[2], ecx, eax)
+			if stmt[1] == ("var", "SELF"):
+				self.gen_expr(stmt[3])
+				self.out.put_self_field(stmt[2], eax)
+			else:
+				self.gen_expr(stmt[1])
+				self.out.push(eax)
+				self.gen_expr(stmt[3])
+				self.out.pop(ecx)
+				self.out.put_field(stmt[2], ecx, eax)
 		else:
 			raise Exception("Internal error: unknown %s" % (stmt,))
 
 	def gen_block(self, name, length_ref, cond, body):
-		local_vars = set()
+		self.out.reset_local_vars()
+
 		self.out.label(name)
 		self.out.push(ebx)
 		self.out.mov(ebx, eax)
 		for stmt in body:
-			self.gen_stmt(stmt, local_vars)
+			self.gen_stmt(stmt)
 		self.out.pop(ebx)
 		self.out.ret()
 
 		assert length_ref not in self.block_var_map
-		self.block_var_map[length_ref] = local_vars
+		self.block_var_map[length_ref] = self.out.get_local_vars()
 
 	def build_block(self, cond, body):
 		name, lenvar = self.anonymous_block()
