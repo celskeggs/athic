@@ -19,6 +19,7 @@ def escape(name):  # "
 
 eax, ebx, ecx, edx = "eax", "ebx", "ecx", "edx"
 edi, esi, esp, ebp = "edi", "esi", "esp", "ebp"
+arithmetic = ["add", "sub"]
 
 
 class InstructionOutput:
@@ -62,11 +63,11 @@ class InstructionOutput:
 class FieldOutput(InstructionOutput):
 	def __init__(self):
 		InstructionOutput.__init__(self)
-		self.field_ids = set()
+		self.field_set = set()
 
 	def field_ref(self, field):
 		assert field != "SELF"
-		self.field_ids.add(field)
+		self.field_set.add(field)
 		return "fid_%s" % mangle(field)
 
 	def put_field(self, field, object_reg, source_reg):
@@ -76,34 +77,50 @@ class FieldOutput(InstructionOutput):
 		self.get_dword(dst_reg, object_reg, self.field_ref(field))
 
 
-class Generator:
+class ObjectOutput(InstructionOutput):
 	def __init__(self):
-		self.out = FieldOutput()
-		self.externals = {"ath_alloc"}
-		self.provided = []
+		InstructionOutput.__init__(self)
+
+	def gen_alloc(self, length, name):
+		self.mov(eax, length)
+		self.call("ath_alloc")
+		self.mov("dword [eax]", name)
+
+
+class StringOutput(InstructionOutput):
+	def __init__(self):
+		InstructionOutput.__init__(self)
 		self.string_set = set()
-		self.blocks = []
-		self.block_var_map = {}
-		self.next_block = 0
-		self.ctor = InstructionOutput()
-		self.data = []
 
 	def string(self, string):
 		self.string_set.add(string)
 		return "string_" + mangle(string)
 
-	def gen_alloc(self, length_info_ref, name, out=None):
-		out = out or self.out
-		out.mov(eax, length_info_ref)
-		out.call("ath_alloc")
-		out.mov("dword [eax]", name)
+
+class FullOutput(FieldOutput, StringOutput, ObjectOutput):
+	def __init__(self):
+		FieldOutput.__init__(self)
+		StringOutput.__init__(self)
+		ObjectOutput.__init__(self)
+
+
+class Generator:
+	def __init__(self):
+		self.out = FullOutput()
+		self.externals = {"ath_alloc"}
+		self.provided = []
+		self.blocks = []
+		self.block_var_map = {}
+		self.next_block = 0
+		self.ctor = FullOutput()
+		self.data = []
 
 	def process(self, cond, body, module_name):
 		assert not self.blocks
-		length_info_ref, name = self.build_block(cond, body)
+		length_ref, name = self.build_block(cond, body)
 		while self.blocks:
 			self.gen_block(*self.blocks.pop())
-		self.gen_alloc(length_info_ref, name, self.ctor)
+		self.ctor.gen_alloc(length_ref, name)
 		self.data += ["ctor_ptr_%s: dd 0" % mangle(module_name)]
 		self.provided.append("ctor_ptr_%s" % mangle(module_name))
 		self.ctor.mov("[ctor_ptr_%s]" % mangle(module_name), eax)
@@ -123,7 +140,7 @@ class Generator:
 			return []
 		elif expr[0] == "tildeath":
 			return []
-		elif expr[0] in self.arithmetic:
+		elif expr[0] in arithmetic:
 			return self.get_expr_vars(expr[1]) + self.get_expr_vars(expr[1])
 		else:
 			raise Exception("Internal error: unknown expr %s in %s" % (expr[0], expr[1:]))
@@ -165,7 +182,7 @@ class Generator:
 					ptr = "ctor_ptr_%s" % mangle(stmt[1])
 					self.externals.add(ptr)
 					self.out.mov(eax, "[%s]" % ptr)
-					self.out.put_field("LOOKUP", eax, self.string(stmt[2]))
+					self.out.put_field("LOOKUP", eax, self.out.string(stmt[2]))
 					self.out.call("[eax]")
 					self.out.get_field("EXPORT", eax, eax)
 					self.out.put_field(stmt[2], ebx, eax)
@@ -208,8 +225,6 @@ class Generator:
 		self.next_block += 1
 		return "exec_%d" % bid, "bsize_%d" % bid
 
-	arithmetic = ["add", "sub"]
-
 	def gen_expr(self, expr):  # produces result in eax, SELF is in ebx (preserve)
 		if expr[0] == "deref":
 			self.gen_expr(expr[1])
@@ -223,11 +238,11 @@ class Generator:
 			if type(expr[1]) == int:
 				self.out.mov(eax, expr[1])
 			elif type(expr[1]) == str:
-				self.out.mov(eax, self.string(expr[1]))
+				self.out.mov(eax, self.out.string(expr[1]))
 		elif expr[0] == "tildeath":
-			length_info_ref, name = self.build_block(expr[1], expr[2])
-			self.gen_alloc(length_info_ref, name)
-		elif expr[0] in self.arithmetic:
+			length, name = self.build_block(expr[1], expr[2])
+			self.out.gen_alloc(length, name)
+		elif expr[0] in arithmetic:
 			self.gen_expr(expr[1])
 			self.out.push(eax)
 			self.gen_expr(expr[2])
@@ -257,7 +272,7 @@ class Generator:
 
 	def solve_and_apply_variables(self, forced=None):
 		colors = color_graph(self.calculate_conflict_map(), forced or {})
-		for ent in self.out.field_ids:
+		for ent in self.out.field_set:
 			assert ent in colors, "ERROR: Never had a definition for field: %s" % ent  # Should be undefined behavior?
 		block_length_map = {}
 		for key, variables in self.block_var_map.items():
@@ -276,8 +291,8 @@ class Generator:
 		if self.out.get() or self.externals:
 			out += ["section .text"]
 			out += ["extern %s" % x for x in self.externals if x not in self.provided] + self.out.get()
-		if self.string_set:
-			out += ["section .rodata"] + [self.string_define(string) for string in self.string_set]
+		if self.out.string_set:
+			out += ["section .rodata"] + [self.string_define(string) for string in self.out.string_set]
 		if self.data:
 			out += ["section .data"] + self.data
 		if self.ctor.get():
