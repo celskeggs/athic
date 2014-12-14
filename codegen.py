@@ -1,8 +1,17 @@
 from graph_coloring import color_graph
 
 
+def mangle_char(c):
+	if c.isalnum() or c == ".":
+		return c
+	elif c == "_":
+		return "__"
+	else:
+		return "_%x" % ord(c)
+
+
 def mangle(name):  # _, $, ~
-	return name.replace("_", "__").replace("$", "_D").replace("~", "_T")
+	return "".join(map(mangle_char, name))
 
 
 def escape(name):  # "
@@ -29,10 +38,10 @@ class InstructionOutput:
 		return self.buffer
 
 	def put_dword(self, dst, field, src):
-		self.mov("dword [%s+%s]" % (dst, mangle(field)), src)
+		self.mov("dword [%s+%s]" % (dst, field), src)
 
 	def get_dword(self, dst, src, field):
-		self.mov(dst, "dword [%s+%s]" % (src, mangle(field)))
+		self.mov(dst, "dword [%s+%s]" % (src, field))
 
 	def label(self, name):
 		self.raw("%s:" % name)
@@ -50,23 +59,38 @@ class InstructionOutput:
 		self.raw('\tret')
 
 
+class FieldOutput(InstructionOutput):
+	def __init__(self):
+		InstructionOutput.__init__(self)
+		self.field_ids = set()
+
+	def field_ref(self, field):
+		assert field != "SELF"
+		self.field_ids.add(field)
+		return "fid_%s" % mangle(field)
+
+	def put_field(self, field, object_reg, source_reg):
+		self.put_dword(object_reg, self.field_ref(field), source_reg)
+
+	def get_field(self, field, object_reg, dst_reg):
+		self.get_dword(dst_reg, object_reg, self.field_ref(field))
+
+
 class Generator:
 	def __init__(self):
-		self.out = InstructionOutput()
+		self.out = FieldOutput()
 		self.externals = {"ath_alloc"}
 		self.provided = []
-		self.strings = []
+		self.string_set = set()
 		self.blocks = []
-		self.field_ids = set()
 		self.block_var_map = {}
 		self.next_block = 0
 		self.ctor = InstructionOutput()
 		self.data = []
 
 	def string(self, string):
-		if string not in self.strings:
-			self.strings.append(string)
-		return "string_%d ; %s" % (self.strings.index(string), escape(string))
+		self.string_set.add(string)
+		return "string_" + mangle(string)
 
 	def gen_alloc(self, length_info_ref, name, out=None):
 		out = out or self.out
@@ -83,18 +107,6 @@ class Generator:
 		self.data += ["ctor_ptr_%s: dd 0" % mangle(module_name)]
 		self.provided.append("ctor_ptr_%s" % mangle(module_name))
 		self.ctor.mov("[ctor_ptr_%s]" % mangle(module_name), eax)
-
-	def put_field(self, field, object_reg, source_reg):
-		assert field != "SELF"
-		self.field_ids.add(field)
-		field_id_ref = "fid_%s" % mangle(field)
-		self.out.put_dword(object_reg, field_id_ref, source_reg)
-
-	def get_field(self, field, object_reg, dest_reg):
-		assert field != "SELF"
-		self.field_ids.add(field)
-		field_id_ref = "fid_%s" % mangle(field)
-		self.out.get_dword(dest_reg, object_reg, field_id_ref)
 
 	def get_expr_vars(self, expr):
 		if expr[0] == "deref":
@@ -153,17 +165,17 @@ class Generator:
 					ptr = "ctor_ptr_%s" % mangle(stmt[1])
 					self.externals.add(ptr)
 					self.out.mov(eax, "[%s]" % ptr)
-					self.put_field("LOOKUP", eax, self.string(stmt[2]))
+					self.out.put_field("LOOKUP", eax, self.string(stmt[2]))
 					self.out.call("[eax]")
-					self.get_field("EXPORT", eax, eax)
-					self.put_field(stmt[2], ebx, eax)
+					self.out.get_field("EXPORT", eax, eax)
+					self.out.put_field(stmt[2], ebx, eax)
 				elif stmt[0] == "execute":
 					self.gen_expr(stmt[1])
 					self.out.push(eax)
 					self.gen_expr(stmt[2])
 					self.out.mov(ecx, eax)
 					self.out.pop(eax)
-					self.put_field("THIS", eax, ecx)
+					self.out.put_field("THIS", eax, ecx)
 					self.out.call("[eax]")
 				elif stmt[0] == "direct":
 					self.gen_expr(stmt[1])
@@ -172,13 +184,13 @@ class Generator:
 					self.gen_expr(stmt[1])
 				elif stmt[0] == "put":
 					self.gen_expr(stmt[2])
-					self.put_field(stmt[1], ebx, eax)
+					self.out.put_field(stmt[1], ebx, eax)
 				elif stmt[0] == "putref":  # object, field, value
 					self.gen_expr(stmt[1])
 					self.out.push(eax)
 					self.gen_expr(stmt[3])
 					self.out.pop(ecx)
-					self.put_field(stmt[2], ecx, eax)
+					self.out.put_field(stmt[2], ecx, eax)
 				else:
 					raise Exception("Internal error: unknown %s" % (stmt,))
 			self.out.pop(ebx)
@@ -201,10 +213,10 @@ class Generator:
 	def gen_expr(self, expr):  # produces result in eax, SELF is in ebx (preserve)
 		if expr[0] == "deref":
 			self.gen_expr(expr[1])
-			self.get_field(expr[2], "eax", "eax")
+			self.out.get_field(expr[2], "eax", "eax")
 		elif expr[0] == "var":
 			if expr[1] != "SELF":
-				self.get_field(expr[1], "ebx", "eax")
+				self.out.get_field(expr[1], "ebx", "eax")
 			else:
 				self.out.mov(eax, ebx)
 		elif expr[0] == "const":
@@ -225,9 +237,9 @@ class Generator:
 		else:
 			raise Exception("Internal error: unknown expr %s in %s" % (expr[0], expr[1:]))
 
-	def string_define(self, i, string):
+	def string_define(self, string):
 		byte_values = [str(ord(x)) for x in string] + ["0"]
-		return 'string_%d: db %s ; %s' % (i, ", ".join(byte_values), escape(string))
+		return 'string_%s: db %s ; %s' % (mangle(string), ", ".join(byte_values), escape(string))
 
 	def calculate_conflict_map(self):
 		variables = set()
@@ -245,7 +257,7 @@ class Generator:
 
 	def solve_and_apply_variables(self, forced=None):
 		colors = color_graph(self.calculate_conflict_map(), forced or {})
-		for ent in self.field_ids:
+		for ent in self.out.field_ids:
 			assert ent in colors, "ERROR: Never had a definition for field: %s" % ent  # Should be undefined behavior?
 		block_length_map = {}
 		for key, variables in self.block_var_map.items():
@@ -255,7 +267,7 @@ class Generator:
 			words = 1  # for header
 			words += max([0] + [1 + n for n in ids])  # add enough fields so that all of the fields have a place to go.
 			block_length_map[key] = 4 * words
-		out = ["fid_%s equ %d" % (mangle(key), value) for key, value in colors.items()]
+		out = ["%s equ %d" % (self.out.field_ref(key), value) for key, value in colors.items()]
 		out += ["%s equ %d" % (key, value) for key, value in block_length_map.items()]
 		return out
 
@@ -264,8 +276,8 @@ class Generator:
 		if self.out.get() or self.externals:
 			out += ["section .text"]
 			out += ["extern %s" % x for x in self.externals if x not in self.provided] + self.out.get()
-		if self.strings:
-			out += ["section .rodata"] + [self.string_define(i, string) for i, string in enumerate(self.strings)]
+		if self.string_set:
+			out += ["section .rodata"] + [self.string_define(string) for string in self.string_set]
 		if self.data:
 			out += ["section .data"] + self.data
 		if self.ctor.get():
