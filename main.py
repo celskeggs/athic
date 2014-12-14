@@ -7,7 +7,8 @@ from parser import parse
 # object model:
 # +0: fptr to EXECUTE target - must preserve ebx.
 #     eax should be the object - must preserve.
-# +4, +8, +12, ...: object fields
+# +4: byte for alive or not: 0 is dead, anything else is alive
+# +5, +9, +13, ...: object fields
 #     each field name has a globally-assigned index, which applies to any object that it is in.
 #     this removes the need for runtime type checking
 # IMPORT methods should preserve ebx, and return result in eax.

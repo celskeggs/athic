@@ -60,6 +60,18 @@ class InstructionOutput:
 	def ret(self):
 		self.raw('\tret')
 
+	def jmp(self, name):
+		self.raw('\tjmp %s' % name)
+
+	def cmp(self, a, b):
+		self.raw('\tcmp %s, %s' % (a, b))
+
+	def je(self, target):
+		self.raw("\tje %s" % target)
+
+	def jne(self, target):
+		self.raw("\tjne %s" % target)
+
 
 class FieldOutput(InstructionOutput):
 	def __init__(self):
@@ -73,10 +85,10 @@ class FieldOutput(InstructionOutput):
 		return "fid_%s" % mangle(field)
 
 	def put_field(self, field, object_reg, source_reg):
-		self.put_dword(object_reg, self.field_ref(field), source_reg)
+		self.put_dword(object_reg, "5+4*" + self.field_ref(field), source_reg)
 
 	def get_field(self, field, object_reg, dst_reg):
-		self.get_dword(dst_reg, object_reg, self.field_ref(field))
+		self.get_dword(dst_reg, object_reg, "5+4*" + self.field_ref(field))
 
 	def reset_local_vars(self):
 		self.local_vars = set()
@@ -103,6 +115,17 @@ class ObjectOutput(InstructionOutput):
 		self.mov(eax, length)
 		self.call("ath_alloc")
 		self.mov("dword [eax]", name)
+		self.set_alive(eax)
+
+	def jump_alive(self, target): # if object in eax is alive, jump to target
+		self.cmp("byte [eax+5]", 0)
+		self.jne(target)
+
+	def set_alive(self, target):
+		self.mov("byte [%s+5]" % target, 1)
+
+	def set_dead(self, target):
+		self.mov("byte [%s+5]" % target, 0)
 
 
 class StringOutput(InstructionOutput):
@@ -198,8 +221,23 @@ class TreeOutput(FieldOutput, StringOutput, ObjectOutput):
 		self.label(name)
 		self.push(ebx)
 		self.mov(ebx, eax)
-		for stmt in body:
-			self.gen_stmt(stmt)
+		self.set_alive(eax)
+
+		if cond:
+			self.jmp(".loop_check")
+
+			self.label(".loop_top")
+			for stmt in body:
+				self.gen_stmt(stmt)
+
+			self.label(".loop_check")
+			self.gen_expr(cond)
+			self.jump_alive(".loop_top")
+		else:
+			for stmt in body:
+				self.gen_stmt(stmt)
+
+		self.set_dead(ebx)
 		self.pop(ebx)
 		self.ret()
 
