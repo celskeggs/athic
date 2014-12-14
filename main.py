@@ -19,5 +19,5 @@ gen = Generator()
 assert sys.argv[1:], "Expected arguments."
 for file in sys.argv[1:]:
 	with open(file, "r") as inp:
-		gen.process(None, parse(inp), ".".join(file.split(".")[:-1]))
-print(gen.output([], {"DIE": 0, "write": 1, "EXPORT": 2, "LOOKUP": 3}))
+		gen.add_module(None, parse(inp), ".".join(file.split(".")[:-1]))
+print(gen.finish([], {"DIE": 0, "write": 1, "EXPORT": 2, "LOOKUP": 3}))

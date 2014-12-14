@@ -1,5 +1,3 @@
-
-
 def tokenize(producer):
 	mode = 0
 	current = None

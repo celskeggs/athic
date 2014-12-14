@@ -17,6 +17,7 @@ def mangle(name):  # _, $, ~
 def escape(name):  # "
 	return name.replace("\\", "\\\\").replace('"', '\\"').replace('\n', '\\n')
 
+
 eax, ebx, ecx, edx = "eax", "ebx", "ecx", "edx"
 edi, esi, esp, ebp = "edi", "esi", "esp", "ebp"
 arithmetic = ["add", "sub"]
@@ -132,11 +133,9 @@ class Generator:
 		self.ctor = FullOutput()
 		self.data = []
 
-	def process(self, cond, body, module_name):
+	def add_module(self, cond, body, module_name):
 		assert not self.blocks
 		length_ref, name = self.build_block(cond, body)
-		while self.blocks:
-			self.gen_block(*self.blocks.pop())
 		self.ctor.gen_alloc(length_ref, name)
 		self.data += ["ctor_ptr_%s: dd 0" % mangle(module_name)]
 		self.provided.append("ctor_ptr_%s" % mangle(module_name))
@@ -268,7 +267,9 @@ class Generator:
 		out += ["%s equ %d" % (key, value) for key, value in block_length_map.items()]
 		return out
 
-	def output(self, pretext=(), preallocated=None):
+	def finish(self, pretext=(), preallocated=None):
+		while self.blocks:
+			self.gen_block(*self.blocks.pop())
 		out = self.solve_and_apply_variables(preallocated) + list(pretext)
 		if self.out.get() or self.externals:
 			out += ["section .text"]
