@@ -36,6 +36,9 @@ class InstructionOutput:
 	def mov(self, dst, src):
 		self.raw("\tmov %s, %s" % (dst, src))
 
+	def movzx(self, dst, src):
+		self.raw("\tmovzx %s, %s" % (dst, src))
+
 	def get(self):
 		return self.buffer
 
@@ -71,6 +74,9 @@ class InstructionOutput:
 
 	def jne(self, target):
 		self.raw("\tjne %s" % target)
+
+	def jb(self, target):
+		self.raw("\tjb %s" % target)
 
 
 class FieldOutput(InstructionOutput):
@@ -118,14 +124,16 @@ class ObjectOutput(InstructionOutput):
 		self.set_alive(eax)
 
 	def jump_alive(self, target): # if object in eax is alive, jump to target
-		self.cmp("byte [eax+5]", 0)
+		self.cmp(eax, 256)
+		self.jb(target)
+		self.cmp("byte [eax+4]", 0)
 		self.jne(target)
 
 	def set_alive(self, target):
-		self.mov("byte [%s+5]" % target, 1)
+		self.mov("byte [%s+4]" % target, 1)
 
 	def set_dead(self, target):
-		self.mov("byte [%s+5]" % target, 0)
+		self.mov("byte [%s+4]" % target, 0)
 
 
 class StringOutput(InstructionOutput):
@@ -169,6 +177,9 @@ class TreeOutput(FieldOutput, StringOutput, ObjectOutput):
 		elif expr[0] == "tildeath":
 			length, name = self.loop_build_callback(expr[1], expr[2])
 			self.gen_alloc(length, name)
+		elif expr[0] == "unptr":
+			self.gen_expr(expr[1])
+			self.movzx(eax, "byte [eax]")
 		elif expr[0] in arithmetic:
 			self.gen_expr(expr[1])
 			self.push(eax)
@@ -177,7 +188,7 @@ class TreeOutput(FieldOutput, StringOutput, ObjectOutput):
 			self.pop(eax)
 			self.raw('\t%s eax, ecx' % expr[0])
 		else:
-			raise Exception("Internal error: unknown expr %s in %s" % (expr[0], expr[1:]))
+			raise Exception("Internal error: unknown expr %s with %s" % (expr[0], expr[1:]))
 
 	def gen_stmt(self, stmt):
 		if stmt[0] == "import":

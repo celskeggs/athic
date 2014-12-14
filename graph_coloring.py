@@ -11,7 +11,7 @@ def color_graph_greedy(variable_set, conflict_map, forced):
 
 def do_remap(mapping, remaps):
 	for to_key, from_key in remaps.items():
-		assert to_key not in mapping
+		assert to_key not in mapping, "Duplicate: %s // %s" % (to_key, mapping)
 		mapping[to_key] = mapping[from_key]
 	return mapping
 
@@ -26,6 +26,9 @@ def color_graph(conflict_map, forced):
 				break
 	for ent in tuple(remaps):
 		if ent not in remaps:
+			continue
+		if ent in forced:
+			del remaps[ent]
 			continue
 		target = remaps[ent]
 		recent = []
