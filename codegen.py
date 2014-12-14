@@ -125,112 +125,15 @@ class Generator:
 		self.provided.append("ctor_ptr_%s" % mangle(module_name))
 		self.ctor.mov("[ctor_ptr_%s]" % mangle(module_name), eax)
 
-	def get_expr_vars(self, expr):
+	def gen_expr(self, expr, local_vars):  # produces result in eax, SELF is in ebx (preserve)
 		if expr[0] == "deref":
 			if expr[1][0] == "var" and expr[1][1] == "SELF":
-				return [expr[2]]
-			else:
-				return self.get_expr_vars(expr[1])
-		elif expr[0] == "var":
-			if expr[1] != "SELF":
-				return [expr[1]]
-			else:
-				return []
-		elif expr[0] == "const":
-			return []
-		elif expr[0] == "tildeath":
-			return []
-		elif expr[0] in arithmetic:
-			return self.get_expr_vars(expr[1]) + self.get_expr_vars(expr[1])
-		else:
-			raise Exception("Internal error: unknown expr %s in %s" % (expr[0], expr[1:]))
-
-	def get_vars(self, block):
-		found = []
-		for stmt in block:
-			if stmt[0] == "import":
-				found.append(stmt[2])
-			elif stmt[0] == "execute":
-				found += self.get_expr_vars(stmt[1])
-				found += self.get_expr_vars(stmt[2])
-			elif stmt[0] == "direct":
-				found += self.get_expr_vars(stmt[1])
-			elif stmt[0] == "discard":
-				found += self.get_expr_vars(stmt[1])
-			elif stmt[0] == "put":
-				found += self.get_expr_vars(stmt[2])
-				found.append(stmt[1])
-			elif stmt[0] == "putref":
-				if stmt[1][0] == "var" and stmt[1][1] == "SELF":
-					found.append(stmt[2])
-				found += self.get_expr_vars(stmt[1])
-				found += self.get_expr_vars(stmt[3])
-			else:
-				raise Exception("Internal error: unknown stmt %s" % (stmt,))
-		return found
-
-	def gen_block(self, name, cond, block):
-		self.out.label(name)
-		if type(block) == str:
-			for line in str.split("\n"):
-				self.out.raw(line)
-		else:
-			self.out.push(ebx)
-			self.out.mov(ebx, eax)
-			for stmt in block:
-				if stmt[0] == "import":
-					ptr = "ctor_ptr_%s" % mangle(stmt[1])
-					self.externals.add(ptr)
-					self.out.mov(eax, "[%s]" % ptr)
-					self.out.put_field("LOOKUP", eax, self.out.string(stmt[2]))
-					self.out.call("[eax]")
-					self.out.get_field("EXPORT", eax, eax)
-					self.out.put_field(stmt[2], ebx, eax)
-				elif stmt[0] == "execute":
-					self.gen_expr(stmt[1])
-					self.out.push(eax)
-					self.gen_expr(stmt[2])
-					self.out.mov(ecx, eax)
-					self.out.pop(eax)
-					self.out.put_field("THIS", eax, ecx)
-					self.out.call("[eax]")
-				elif stmt[0] == "direct":
-					self.gen_expr(stmt[1])
-					self.out.call("[eax]")
-				elif stmt[0] == "discard":
-					self.gen_expr(stmt[1])
-				elif stmt[0] == "put":
-					self.gen_expr(stmt[2])
-					self.out.put_field(stmt[1], ebx, eax)
-				elif stmt[0] == "putref":  # object, field, value
-					self.gen_expr(stmt[1])
-					self.out.push(eax)
-					self.gen_expr(stmt[3])
-					self.out.pop(ecx)
-					self.out.put_field(stmt[2], ecx, eax)
-				else:
-					raise Exception("Internal error: unknown %s" % (stmt,))
-			self.out.pop(ebx)
-			self.out.ret()
-
-	def build_block(self, cond, body):
-		name, lenvar = self.anonymous_block()
-		self.blocks.append((name, cond, body))
-		assert lenvar not in self.block_var_map
-		self.block_var_map[lenvar] = set(self.get_vars(body))
-		return lenvar, name
-
-	def anonymous_block(self):
-		bid = self.next_block
-		self.next_block += 1
-		return "exec_%d" % bid, "bsize_%d" % bid
-
-	def gen_expr(self, expr):  # produces result in eax, SELF is in ebx (preserve)
-		if expr[0] == "deref":
-			self.gen_expr(expr[1])
+				local_vars.add(expr[2])
+			self.gen_expr(expr[1], local_vars)
 			self.out.get_field(expr[2], "eax", "eax")
 		elif expr[0] == "var":
 			if expr[1] != "SELF":
+				local_vars.add(expr[1])
 				self.out.get_field(expr[1], "ebx", "eax")
 			else:
 				self.out.mov(eax, ebx)
@@ -243,14 +146,75 @@ class Generator:
 			length, name = self.build_block(expr[1], expr[2])
 			self.out.gen_alloc(length, name)
 		elif expr[0] in arithmetic:
-			self.gen_expr(expr[1])
+			self.gen_expr(expr[1], local_vars)
 			self.out.push(eax)
-			self.gen_expr(expr[2])
+			self.gen_expr(expr[2], local_vars)
 			self.out.mov(ecx, eax)
 			self.out.pop(eax)
 			self.out.raw('\t%s eax, ecx' % expr[0])
 		else:
 			raise Exception("Internal error: unknown expr %s in %s" % (expr[0], expr[1:]))
+
+	def gen_stmt(self, stmt, local_vars):
+		if stmt[0] == "import":
+			ptr = "ctor_ptr_%s" % mangle(stmt[1])
+			self.externals.add(ptr)
+			self.out.mov(eax, "[%s]" % ptr)
+			self.out.put_field("LOOKUP", eax, self.out.string(stmt[2]))
+			self.out.call("[eax]")
+			self.out.get_field("EXPORT", eax, eax)
+			local_vars.add(stmt[2])
+			self.out.put_field(stmt[2], ebx, eax)
+		elif stmt[0] == "execute":
+			self.gen_expr(stmt[1], local_vars)
+			self.out.push(eax)
+			self.gen_expr(stmt[2], local_vars)
+			self.out.mov(ecx, eax)
+			self.out.pop(eax)
+			self.out.put_field("THIS", eax, ecx)
+			self.out.call("[eax]")
+		elif stmt[0] == "direct":
+			self.gen_expr(stmt[1], local_vars)
+			self.out.call("[eax]")
+		elif stmt[0] == "discard":
+			self.gen_expr(stmt[1], local_vars)
+		elif stmt[0] == "put":
+			self.gen_expr(stmt[2], local_vars)
+			local_vars.add(stmt[1])
+			self.out.put_field(stmt[1], ebx, eax)
+		elif stmt[0] == "putref":  # object, field, value
+			if stmt[1][0] == "var" and stmt[1][1] == "SELF":
+				local_vars.add(stmt[2])
+			self.gen_expr(stmt[1], local_vars)
+			self.out.push(eax)
+			self.gen_expr(stmt[3], local_vars)
+			self.out.pop(ecx)
+			self.out.put_field(stmt[2], ecx, eax)
+		else:
+			raise Exception("Internal error: unknown %s" % (stmt,))
+
+	def gen_block(self, name, length_ref, cond, body):
+		local_vars = set()
+		self.out.label(name)
+		self.out.push(ebx)
+		self.out.mov(ebx, eax)
+		for stmt in body:
+			self.gen_stmt(stmt, local_vars)
+		self.out.pop(ebx)
+		self.out.ret()
+
+		assert length_ref not in self.block_var_map
+		self.block_var_map[length_ref] = local_vars
+
+	def build_block(self, cond, body):
+		name, lenvar = self.anonymous_block()
+		self.blocks.append((name, lenvar, cond, body))
+		return lenvar, name
+
+	def anonymous_block(self):
+		bid = self.next_block
+		self.next_block += 1
+		return "exec_%d" % bid, "bsize_%d" % bid
 
 	def string_define(self, string):
 		byte_values = [str(ord(x)) for x in string] + ["0"]
