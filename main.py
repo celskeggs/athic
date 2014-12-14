@@ -21,4 +21,4 @@ assert sys.argv[1:], "Expected arguments."
 for file in sys.argv[1:]:
 	with open(file, "r") as inp:
 		gen.add_module(None, parse(inp), ".".join(file.split(".")[:-1]))
-print(gen.finish([], {"eax": 0, "ebx": 1, "ecx": 2, "edx": 3, "DIE": 4, "write": 5, "EXPORT": 6, "LOOKUP": 7}))
+print(gen.finish([], {"THIS": 0, "eax": 1, "ebx": 2, "ecx": 3, "edx": 4, "EXPORT": 5, "LOOKUP": 6, "write": 7, "DIE": 8}))

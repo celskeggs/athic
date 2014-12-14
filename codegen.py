@@ -264,7 +264,6 @@ class Generator:
 		self.data = []
 
 	def add_module(self, cond, body, module_name):
-		assert not self.blocks
 		length_ref, name = self.build_block(cond, body)
 		self.ctor.gen_alloc(length_ref, name)
 		self.data += ["ctor_ptr_%s: dd 0" % mangle(module_name)]

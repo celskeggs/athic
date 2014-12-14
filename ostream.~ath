@@ -1,8 +1,6 @@
 // import method strlen;
 import native write;
 
-write.eax = 0x04;
-
 strlen = ~ATH(THIS) {
 	core EXECUTE THIS;
 	length = core.THIS - THIS;
@@ -16,10 +14,12 @@ EXPORT = ~ATH(NULL) {
 };
 EXPORT.write = ~ATH(THIS) {
 	strlen EXECUTE THIS;
+	write.eax = 4;
 	write.ebx = 1;
 	write.ecx = THIS;
 	write.edx = strlen.length;
 	write EXECUTE NULL;
+	// TODO: check result of WRITE system call
 	THIS = NULL;
 };
 EXPORT.write.strlen = strlen;
