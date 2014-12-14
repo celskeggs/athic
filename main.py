@@ -11,7 +11,7 @@ def tokenize(producer):
 				if c.isalnum() or c in "_$~":
 					mode = 1
 					current = c
-				elif c in ";,.!=(){}-+":
+				elif c in ";,.!=(){}-+@":
 					yield (c, c)
 				elif c == "`":
 					mode = 2
@@ -96,7 +96,8 @@ class Parser:
 	def expect(self, token):
 		assert self.accept(token), "Expected token %s but got %s" % (token, self.token())
 		return self.last_value
-	operators = {1: ".", 2: "+-"}
+	operators = {1: ".", 3: "+-"}
+	unary_ops = {2: "@"}
 	arith_map = {"+": "add", "-": "sub"}
 	def produce_operator(self, a, operator, prec):
 		if operator == ".":
@@ -106,7 +107,12 @@ class Parser:
 			b = self.parse_expression(prec - 1)
 			return (self.arith_map[operator], a, b)
 		else:
-			raise Exception("Internal error: unexpected " + operator)
+			raise Exception("Internal error: unexpected %s" % (operator,))
+	def produce_operator_unary(self, operator, expr):
+		if operator == "@":
+			return ("unptr", expr)
+		else:
+			raise Exception("Internal error: unexpected %s" % (operator,))
 	def parse_expression(self, prec=max(operators.keys())):
 		if prec <= 0: # simple term
 			if self.accept("symbol"):
@@ -126,8 +132,14 @@ class Parser:
 				self.expect(")")
 				return out
 		else:
+			uops = []
+			while self.accept_any(self.unary_ops.get(prec,())):
+				uops.append(self.last_token)
 			head = self.parse_expression(prec - 1)
-			while self.accept_any(self.operators[prec]):
+			uops.reverse()
+			for op in uops:
+				head = self.produce_operator_unary(op, head)
+			while self.accept_any(self.operators.get(prec,())):
 				operator = self.last_token
 				head = self.produce_operator(head, operator, prec)
 			return head

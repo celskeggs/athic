@@ -5,7 +5,7 @@ strlen = ~ATH(THIS) {
 	core EXECUTE THIS;
 	length = core.THIS - THIS;
 };
-strlen.core = ~ATH(getptr(THIS)) {
+strlen.core = ~ATH(@THIS) {
 	THIS = THIS + 1;
 };
 
