@@ -1,3 +1,6 @@
+from graph_coloring import color_graph
+
+
 def mangle(name):  # _, $, ~
 	return name.replace("_", "__").replace("$", "_D").replace("~", "_T")
 
@@ -186,17 +189,6 @@ class Generator:
 		byte_values = [str(ord(x)) for x in string] + ["0"]
 		return 'string_%d: db %s ; %s' % (i, ", ".join(byte_values), escape(string))
 
-	def basic_graph_color(self, variable_set, conflict_map, preallocated=None):
-		colors = dict(preallocated) if preallocated else {}
-		for v in variable_set:  # greedy algorithm
-			if preallocated and v in preallocated:
-				continue
-			assert v not in colors
-			existing = [colors[x] for x in conflict_map[v] if x in colors]
-			color = min(x for x in range(len(existing) + 1) if x not in existing)
-			colors[v] = color
-		return colors
-
 	def calculate_conflict_map(self):
 		variables = set()
 		for var_set in self.block_var_map.values():
@@ -211,41 +203,8 @@ class Generator:
 						conflict_map[var1].add(var2)
 		return conflict_map
 
-	def solve_variables(self, preallocated=None):
-		conflict_map = self.calculate_conflict_map()
-		remaps = {}
-		# find any locations where the conflict map of one entry is a subset (inclusive) of another entry
-		for k1, m1 in conflict_map.items():
-			for k2, m2 in conflict_map.items():
-				if k1 == k2:
-					continue
-				if m1.issubset(m2) and k1 not in m2 and k2 not in m1:
-					remaps[k1] = k2
-					break
-		for ent in tuple(remaps):
-			if ent not in remaps:
-				continue
-			target = remaps[ent]
-			recent = []
-			while target in remaps and target not in recent:
-				recent.append(target)
-				target = remaps[target]
-			remaps[ent] = target
-			if target in recent:  # we've got a loop. kill the loop. (we can kill it anywhere and it'll fix the problem.)
-				del remaps[target]
-		for ent in remaps:
-			assert remaps[ent] not in remaps
-		real_vars = set(conflict_map.keys()) - set(remaps.keys())
-		new_preallocated = {}
-		for key, value in preallocated.items():
-			new_preallocated[remaps.get(key, key)] = value
-		colors = self.basic_graph_color(real_vars, conflict_map, new_preallocated)
-		for src, dst in remaps.items():
-			colors[src] = colors[dst]
-		return colors
-
-	def solve_and_apply_variables(self, preallocated=None):
-		colors = self.solve_variables(preallocated)
+	def solve_and_apply_variables(self, forced=None):
+		colors = color_graph(self.calculate_conflict_map(), forced or {})
 		for ent in self.field_ids:
 			assert ent in colors, "ERROR: Never had a definition for field: %s" % ent  # Should be undefined behavior?
 		block_length_map = {}
