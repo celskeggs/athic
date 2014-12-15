@@ -1,29 +1,23 @@
 
-extern ath_alloc
+;extern ath_alloc
+ath_alloc equ mmap_panic
+extern anonymous_mmap2
+extern mmap_panic
 
 section .text
 extern main_ptr
 
 global _ath_load_2
 extern _ATH_INIT_START
+extern _ath_alloc_init
 
 _ath_load_2:
 
+    call _ath_alloc_init
+
     call _ATH_INIT_START
 
-    mov ecx, 2
-    call anonymous_mmap2
-
-    mov dword [eax+4096], 128
-    cmp dword [eax+4096], 128
-    jne mmap_failure
-
-    mov eax, 0x01
-    mov ebx, 0x00
-    int 0x80
-
-    ; TODO: make sure that constructors get called
-    mov eax, [main_ptr]
+    ;mov eax, [main_ptr]
     mov dword [eax+29], string_main
     call [eax]
     mov eax, 0x01
@@ -45,7 +39,8 @@ native_syscall:
 
 native_syscall_wrap:
     push eax
-    mov eax, 5+4*5 ; ptr, alive, THIS, eax, ebx, ecx, edx
+    ; blockcounts used in this file must be <= 6, as that's what's specified in codegen.py.
+    mov ecx, 5 ; ptr, alive, THIS, eax, ebx, ecx, edx
     call ath_alloc
     mov dword [eax], native_syscall
     mov byte [eax+4], 1
@@ -61,7 +56,8 @@ section .rodata
 string_main: db "~ATH_MAIN", 0
 
 section .init
-    mov eax, 5+4*6 ; ptr, alive, ..., EXPORT
+    ; blockcounts used in this file must be <= 6, as that's what's specified in codegen.py.
+    mov ecx, 6 ; ptr, alive, ..., EXPORT
     call ath_alloc
     mov dword [eax], native_syscall_wrap
     mov byte [eax+4], 1

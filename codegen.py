@@ -1,5 +1,7 @@
 from graph_coloring import color_graph
 
+import math
+
 
 def mangle_char(c):
 	if c.isalnum() or c == ".":
@@ -118,12 +120,12 @@ class ObjectOutput(InstructionOutput):
 		InstructionOutput.__init__(self)
 
 	def gen_alloc(self, length, name):
-		self.mov(eax, length)
+		self.mov(ecx, length)
 		self.call("ath_alloc")
 		self.mov("dword [eax]", name)
 		self.set_alive(eax)
 
-	def jump_alive(self, target): # if object in eax is alive, jump to target
+	def jump_alive(self, target):  # if object in eax is alive, jump to target
 		self.cmp(eax, 256)
 		self.jb(target)
 		self.cmp("byte [eax+4]", 0)
@@ -316,22 +318,25 @@ class Generator:
 			ids = [colors[x] for x in variables]
 			assert len(ids) == len(set(ids)), "Somehow, an ID was duplicated in a block! Oops: %s => %s" % (
 				variables, ids)
-			words = 1  # for header
-			words += max([0] + [1 + n for n in ids])  # add enough fields so that all of the fields have a place to go.
-			block_length_map[key] = 4 * words
+			words = max([0] + [1 + n for n in ids])  # add enough fields so that all of the fields have a place to go.
+			block_length_map[key] = words
 		out = ["%s equ %d" % (self.out.field_ref(key), value) for key, value in colors.items()]
 		out += ["%s equ %d" % (key, value) for key, value in block_length_map.items()]
-		return out
+		return out, max(block_length_map.values())
 
 	def finish(self, main_module=None, preallocated=None):
 		while self.blocks:
 			self.gen_block(*self.blocks.pop())
-		out = self.solve_and_apply_variables(preallocated)
+		out, max_length = self.solve_and_apply_variables(preallocated)
+		max_length = max(max_length, 6)
+		out += ["global max_alloc_size", "max_alloc_size equ %d" % max_length]
+		out += ["global max_alloc_size_in_pages", "max_alloc_size_in_pages equ %d" % math.ceil(4 * (max_length + 1) / 4096.0)]
 		if self.out.get() or self.out.get_external_refs():
 			out += ["section .text"]
 			out += ["extern %s" % x for x in self.out.get_external_refs() if x not in self.provided] + self.out.get()
 		if self.out.string_set:
 			out += ["section .rodata"] + [self.string_define(string) for string in self.out.string_set]
+			out
 		if self.data:
 			out += ["section .data"] + self.data
 			if main_module:

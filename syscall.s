@@ -7,6 +7,7 @@ section .text
 
 global _ath_load
 global anonymous_mmap2
+extern _ath_load_2
 
 AT_NULL equ 0
 AT_SYSINFO equ 32
@@ -71,7 +72,7 @@ anonymous_mmap2:
 ; edi            0xcaca5555	-892709547 ; fd
 ; eip            0xf7eda611	0xf7eda611 <mmap+49>
 
-
+global mmap_panic
 mmap_panic:
     mov ecx, error_str
     mov edx, error_str_len
