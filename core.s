@@ -2,9 +2,12 @@
 extern ath_alloc
 
 section .text
+extern main_ptr
+global _start
+
 _start:
     ; TODO: make sure that constructors get called
-    mov eax, [ctor_ptr_main]
+    mov eax, [main_ptr]
     mov dword [eax+29], string_main
     call [eax]
     mov eax, 0x01
@@ -35,6 +38,7 @@ native_syscall_wrap:
     ret
 
 section .data
+global ctor_ptr_native
 ctor_ptr_native: dd 0
 
 section .rodata

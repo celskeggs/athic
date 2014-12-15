@@ -266,6 +266,7 @@ class Generator:
 	def add_module(self, cond, body, module_name):
 		length_ref, name = self.build_block(cond, body)
 		self.ctor.gen_alloc(length_ref, name)
+		self.data += ["global ctor_ptr_%s" % mangle(module_name)]
 		self.data += ["ctor_ptr_%s: dd 0" % mangle(module_name)]
 		self.provided.append("ctor_ptr_%s" % mangle(module_name))
 		self.ctor.mov("[ctor_ptr_%s]" % mangle(module_name), eax)
@@ -322,10 +323,10 @@ class Generator:
 		out += ["%s equ %d" % (key, value) for key, value in block_length_map.items()]
 		return out
 
-	def finish(self, pretext=(), preallocated=None):
+	def finish(self, main_module=None, preallocated=None):
 		while self.blocks:
 			self.gen_block(*self.blocks.pop())
-		out = self.solve_and_apply_variables(preallocated) + list(pretext)
+		out = self.solve_and_apply_variables(preallocated)
 		if self.out.get() or self.out.get_external_refs():
 			out += ["section .text"]
 			out += ["extern %s" % x for x in self.out.get_external_refs() if x not in self.provided] + self.out.get()
@@ -333,6 +334,8 @@ class Generator:
 			out += ["section .rodata"] + [self.string_define(string) for string in self.out.string_set]
 		if self.data:
 			out += ["section .data"] + self.data
+			if main_module:
+				out += ["global main_ptr", "main_ptr equ ctor_ptr_%s" % mangle(main_module)]
 		if self.ctor.get():
 			out += ["section .init"] + self.ctor.get()
 		return "\n".join(out)

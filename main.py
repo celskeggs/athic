@@ -16,9 +16,17 @@ from parser import parse
 # ath_alloc allocates 4*eax bytes, which it returns in eax.
 
 
+def get_module_name(name):
+	return ".".join(name.split(".")[:-1])
+
 gen = Generator()
 assert sys.argv[1:], "Expected arguments."
+
+if len(sys.argv) < 2:
+	print("no input files")
+	sys.exit(1)
+
 for file in sys.argv[1:]:
 	with open(file, "r") as inp:
-		gen.add_module(None, parse(inp), ".".join(file.split(".")[:-1]))
-print(gen.finish([], {"THIS": 0, "eax": 1, "ebx": 2, "ecx": 3, "edx": 4, "EXPORT": 5, "LOOKUP": 6, "write": 7, "DIE": 8}))
+		gen.add_module(None, parse(inp), get_module_name(file))
+print(gen.finish(get_module_name(sys.argv[1]), {"THIS": 0, "eax": 1, "ebx": 2, "ecx": 3, "edx": 4, "EXPORT": 5, "LOOKUP": 6, "write": 7, "DIE": 8}))
