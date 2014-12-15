@@ -40,8 +40,7 @@ def color_graph(conflict_map, forced):
 			del remaps[target]
 	for ent in remaps:
 		assert remaps[ent] not in remaps
-	remaining_variables = set(conflict_map.keys()) - set(remaps)
-	remaining_forced = do_remap(dict(forced), remaps)
-	colors = color_graph_greedy(remaining_variables, conflict_map, remaining_forced)
+	remaining_variables = set(conflict_map.keys()) - set(remaps) - set(forced)
+	colors = color_graph_greedy(remaining_variables, conflict_map, forced)
 	do_remap(colors, remaps)
 	return colors
