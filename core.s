@@ -3,9 +3,25 @@ extern ath_alloc
 
 section .text
 extern main_ptr
-global _start
 
-_start:
+global _ath_load_2
+extern _ATH_INIT_START
+
+_ath_load_2:
+
+    call _ATH_INIT_START
+
+    mov ecx, 2
+    call anonymous_mmap2
+
+    mov dword [eax+4096], 128
+    cmp dword [eax+4096], 128
+    jne mmap_failure
+
+    mov eax, 0x01
+    mov ebx, 0x00
+    int 0x80
+
     ; TODO: make sure that constructors get called
     mov eax, [main_ptr]
     mov dword [eax+29], string_main
@@ -50,3 +66,6 @@ section .init
     mov dword [eax], native_syscall_wrap
     mov byte [eax+4], 1
     mov [ctor_ptr_native], eax
+
+section .init.end
+    ret
