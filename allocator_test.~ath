@@ -1,0 +1,7 @@
+import native write;
+
+write.eax = 4;
+write.ebx = 1;
+write.ecx = `HELLO WORLD\n';
+write.edx = 12;
+write EXECUTE NULL;

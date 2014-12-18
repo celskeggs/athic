@@ -16,7 +16,7 @@ SECTIONS
         * (.text);
 _ATH_INIT_START = .;
         * (.init);
-        alloc.o (.init.end);
+        core.o (.init.end);
     }
 
     .data : ALIGN(0x1000) {
