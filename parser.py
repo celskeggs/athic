@@ -58,11 +58,21 @@ def tokenize(producer):
 						yield ("string", current)
 						layers, current, active = None, None, None
 						mode = 0
+				elif c == "\\":
+					if active:
+						current += "'" * active
+						active = 0
+					mode = 4
 				else:
 					if active:
 						current += "'" * active
 						active = 0
 					current += c
+			elif mode == 4:
+				if c == "n":
+					c = "\n"
+				current += c
+				mode = 3
 			else:
 				raise Exception("Bad state: %d" % mode)
 

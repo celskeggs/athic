@@ -34,13 +34,14 @@ native_syscall:
     ret
 
 native_syscall_wrap:
-    push eax
+    push ebx
+    mov ebx, eax
     mov ecx, 5 ; ptr, alive, THIS, eax, ebx, ecx, edx
     call ath_alloc
     mov dword [eax], native_syscall
     mov byte [eax+4], 1
-    pop ebx
     mov dword [ebx+25], eax
+    pop ebx
     ret
 
 section .data

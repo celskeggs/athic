@@ -49,7 +49,9 @@ expand_allocation:
     push ecx
     lea ecx, [5+4*ecx] ; actual memory size of object
     push ecx
+    push ebx
     call anonymous_mmap2 ; implicitly multiplies size by 4096 - so we have 4096 of the object.
+    pop ebx
     pop ecx
     mov edx, ecx
 

@@ -198,7 +198,9 @@ class TreeOutput(FieldOutput, StringOutput, ObjectOutput):
 			self.external_refs.add(ptr)
 			self.mov(eax, "[%s]" % ptr)
 			self.put_field("LOOKUP", eax, self.string(stmt[2]))
+			self.push(eax)
 			self.call("[eax]")
+			self.pop(eax)
 			self.get_field("EXPORT", eax, eax)
 			self.put_self_field(stmt[2], eax)
 		elif stmt[0] == "execute":
@@ -322,6 +324,7 @@ class Generator:
 			block_length_map[key] = words
 		out = ["%s equ %d" % (self.out.field_ref(key), value) for key, value in colors.items()]
 		out += ["%s equ %d" % (key, value) for key, value in block_length_map.items()]
+		out += ["; IDs: %s" % colors]
 		return out, max(block_length_map.values())
 
 	def finish(self, main_module=None, preallocated=None):

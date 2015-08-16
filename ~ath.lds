@@ -4,7 +4,7 @@ ENTRY(_ath_load)
 
 SECTIONS
 {
-    . = 0x400000;
+	. = 0x08048000;
 
     .start : {
         core.o (.text);
@@ -12,18 +12,18 @@ SECTIONS
         alloc.o (.text);
     }
 
-    .text : ALIGN(0x1000) {
+    .text : {
         * (.text);
 _ATH_INIT_START = .;
         * (.init);
         core.o (.init.end);
     }
 
-    .data : ALIGN(0x1000) {
+    .data : {
         * (.data);
     }
 
-    .rodata : ALIGN(0x1000) {
+    .rodata : {
         * (.rodata);
     }
 }
